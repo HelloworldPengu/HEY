@@ -1,25 +1,107 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <title>MBTI 노래 추천 프로그램</title>
+  <meta charset="utf-8" />
+  <title>MBTI 노래 추천 (웹 실행)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script type="module" src="https://pyscript.net/releases/2024.9.1/core.js"></script>
+  <link rel="stylesheet" href="https://pyscript.net/releases/2024.9.1/core.css">
+  <style>
+    body{font-family:system-ui,Apple SD Gothic Neo,Segoe UI,sans-serif;max-width:780px;margin:36px auto;padding:0 16px}
+    .card{border:1px solid #e5e7eb;border-radius:14px;padding:18px;margin-top:14px;box-shadow:0 6px 18px rgba(0,0,0,.06)}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    button{padding:10px 14px;border-radius:10px;border:0;background:#111827;color:#fff;cursor:pointer}
+    select,input{padding:10px;border-radius:10px;border:1px solid #d1d5db}
+    .muted{color:#6b7280;font-size:13px}
+  </style>
 </head>
 <body>
-  <h1>🎵 MBTI 노래 추천 프로그램</h1>
-  <p>아래 버튼을 눌러 Python 파일을 다운로드하세요.</p>
-  <a href="mbti_song.py" download>
-    <button>📥 mbti_song.py 다운로드</button>
-  </a>
-  <p>같은 폴더에 CSV 파일도 같이 두고 실행하세요:</p>
-  <a href="korean_songs_mbti_2500.csv" download>
-    <button>📥 korean_songs_mbti_2500.csv 다운로드</button>
-  </a>
-  <hr>
-  <p>실행 방법:</p>
-  <ol>
-    <li>Python 3 설치</li>
-    <li>위 두 파일을 같은 폴더에 저장</li>
-    <li>명령어창에서 <code>python mbti_song.py</code> 실행</li>
-  </ol>
+  <h1>🎵 MBTI 기반 노래 추천 (설치 없이 웹에서 실행)</h1>
+  <p class="muted">학교 PC에서도 링크만 열면 실행됩니다. 데이터는 저장소의 CSV를 사용합니다.</p>
+
+  <div class="card">
+    <div class="row">
+      <label for="mbti">MBTI</label>
+      <select id="mbti">
+        <option>INTJ</option><option>INTP</option><option>ENTJ</option><option>ENTP</option>
+        <option>INFJ</option><option>INFP</option><option>ENFJ</option><option>ENFP</option>
+        <option>ISTJ</option><option>ISFJ</option><option>ESTJ</option><option>ESFJ</option>
+        <option>ISTP</option><option>ISFP</option><option>ESTP</option><option>ESFP</option>
+      </select>
+      <button id="btn">노래 추천받기</button>
+    </div>
+    <div id="status" class="muted" style="margin-top:8px;">CSV 불러오는 중…</div>
+    <div id="out" style="margin-top:14px;"></div>
+  </div>
+
+  <py-script>
+from pyscript import when
+from js import document, window
+import random, asyncio
+
+songs = {}  # MBTI -> list[(title, artist, url)]
+
+def set_html(id, html): document.getElementById(id).innerHTML = html
+def esc(s): return (s or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+
+async def load_csv_same_origin():
+    # 저장소 루트에 'korean_songs_mbti_2500.csv'가 있다고 가정
+    from pyodide.http import pyfetch
+    url = "/HEY/korean_songs_mbti_2500.csv"  # repo 이름에 맞춰서 경로 고정
+    resp = await pyfetch(url, method="GET")
+    if not resp.ok: raise RuntimeError(f"HTTP {resp.status}")
+    text = await resp.string()
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    header = [h.strip().lower() for h in lines[0].split(",")]
+    def idx(name): 
+        try: return header.index(name)
+        except: return -1
+    i_title, i_artist, i_mbti = idx("title"), idx("artist"), idx("mbti")
+    if min(i_title, i_artist, i_mbti) < 0:
+        raise RuntimeError("CSV 헤더에 title, artist, MBTI 가 필요합니다.")
+    tmp = {}
+    for ln in lines[1:]:
+        cols = [c.strip() for c in ln.split(",")]
+        if i_mbti >= len(cols): continue
+        title  = cols[i_title]  if i_title  < len(cols) else ""
+        artist = cols[i_artist] if i_artist < len(cols) else ""
+        mbti   = (cols[i_mbti]  if i_mbti  < len(cols) else "").upper()
+        if not title or not mbti: 
+            continue
+        q = esc((title + " " + artist).strip())
+        url = f"https://www.youtube.com/results?search_query={q}"
+        tmp.setdefault(mbti, []).append((title, artist, url))
+    return tmp
+
+async def boot():
+    try:
+        global songs
+        songs = await load_csv_same_origin()
+        total = sum(len(v) for v in songs.values())
+        set_html("status", f"✅ CSV 로드 완료: {len(songs)}개 유형 / {total}곡")
+    except Exception as e:
+        set_html("status", f"❌ CSV 로드 실패: {esc(str(e))} — 파일명/경로 확인")
+
+asyncio.ensure_future(boot())
+
+@when("click", selector="#btn")
+def recommend(evt):
+    mbti = document.getElementById("mbti").value
+    data = songs.get(mbti, [])
+    if not data:
+        set_html("out", f"<b>{esc(mbti)}</b> 유형 데이터가 없습니다.")
+        return
+    title, artist, url = random.choice(data)
+    html = f"""
+      <div class='card'>
+        <div><b>추천 곡:</b> {esc(title)}</div>
+        <div><b>아티스트:</b> {esc(artist)}</div>
+        <div style='margin-top:8px'>
+          <button onclick="window.open('{url}','_blank')">유튜브에서 듣기</button>
+        </div>
+      </div>
+    """
+    set_html("out", html)
+  </py-script>
 </body>
 </html>
